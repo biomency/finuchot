@@ -12,10 +12,11 @@ const db = new sqlite3.Database(path.join(__dirname, 'finances.db'), (err) => {
     console.error('Error opening database:', err);
   } else {
     console.log('Connected to SQLite database');
-    // Автоматически создаем таблицу при запуске
+    // Автоматически создаем таблицу с userId при запуске
     db.run(`
       CREATE TABLE IF NOT EXISTS transactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        userId TEXT NOT NULL,
         amount REAL NOT NULL,
         type TEXT NOT NULL,
         category TEXT NOT NULL,
@@ -23,15 +24,24 @@ const db = new sqlite3.Database(path.join(__dirname, 'finances.db'), (err) => {
         description TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
-    `);
+    `, (err) => {
+      if (err) {
+        console.error('Error creating table:', err);
+      } else {
+        console.log('Table ready');
+        // Создаем индекс для быстрого поиска по userId
+        db.run('CREATE INDEX IF NOT EXISTS idx_userId ON transactions(userId)');
+      }
+    });
   }
 });
 
-// 🔧 Инициализация таблицы (опционально, таблица создается автоматически)
+// 🔧 Инициализация таблицы (опционально)
 app.get('/api/init', (req, res) => {
   db.run(`
     CREATE TABLE IF NOT EXISTS transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      userId TEXT NOT NULL,
       amount REAL NOT NULL,
       type TEXT NOT NULL,
       category TEXT NOT NULL,
@@ -47,24 +57,38 @@ app.get('/api/init', (req, res) => {
   });
 });
 
-// 📊 Получить все транзакции
+// 📊 Получить транзакции КОНКРЕТНОГО пользователя
 app.get('/api/transactions', (req, res) => {
-  db.all('SELECT * FROM transactions ORDER BY date DESC, created_at DESC', [], (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
+  const { userId } = req.query;
+  
+  if (!userId) {
+    return res.status(400).json({ error: 'userId обязателен' });
+  }
+  
+  db.all(
+    'SELECT * FROM transactions WHERE userId = ? ORDER BY date DESC, created_at DESC', 
+    [userId], 
+    (err, rows) => {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      res.json({ items: rows });
     }
-    res.json({ items: rows });
-  });
+  );
 });
 
 // ➕ Добавить транзакцию
 app.post('/api/transactions', (req, res) => {
-  const { amount, type, category, date, description } = req.body;
+  const { userId, amount, type, category, date, description } = req.body;
+  
+  if (!userId) {
+    return res.status(400).json({ error: 'userId обязателен' });
+  }
   
   db.run(
-    `INSERT INTO transactions (amount, type, category, date, description) 
-     VALUES (?, ?, ?, ?, ?)`,
-    [amount, type, category, date, description || ''],
+    `INSERT INTO transactions (userId, amount, type, category, date, description) 
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [userId, amount, type, category, date, description || ''],
     function(err) {
       if (err) {
         return res.status(500).json({ error: err.message });
@@ -80,13 +104,31 @@ app.post('/api/transactions', (req, res) => {
   );
 });
 
-// 🗑️ Удалить транзакцию
+// 🗑️ Удалить транзакцию (с проверкой владельца)
 app.delete('/api/transactions/:id', (req, res) => {
-  db.run('DELETE FROM transactions WHERE id = ?', [req.params.id], (err) => {
+  const { userId } = req.query;
+  
+  if (!userId) {
+    return res.status(400).json({ error: 'userId обязателен' });
+  }
+  
+  // Сначала проверяем что транзакция принадлежит этому пользователю
+  db.get('SELECT * FROM transactions WHERE id = ? AND userId = ?', [req.params.id, userId], (err, row) => {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
-    res.json({ success: true });
+    
+    if (!row) {
+      return res.status(404).json({ error: 'Транзакция не найдена или нет доступа' });
+    }
+    
+    // Удаляем только если владелец совпадает
+    db.run('DELETE FROM transactions WHERE id = ?', [req.params.id], (err) => {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      res.json({ success: true });
+    });
   });
 });
 

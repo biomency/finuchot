@@ -100,6 +100,7 @@ function App() {
   const [tab, setTab] = useState('overview');
   const [transactions, setTransactions] = useState([]);
   const [stats, setStats] = useState({ balance: 0, income: 0, expense: 0 });
+  const [userId, setUserId] = useState(null); // ← ДОБАВЬ ЭТО
   const [filter, setFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [dateRange, setDateRange] = useState('all');
@@ -110,8 +111,10 @@ function App() {
   const [showExportMenu, setShowExportMenu] = useState(false);
 
   const loadTransactions = async () => {
+    if (!userId) return; // ← ДОБАВЬ ЭТУ ПРОВЕРКУ
+    
     try {
-      const res = await fetch(`${API}/transactions`);
+      const res = await fetch(`${API}/transactions?userId=${userId}`); // ← ДОБАВЬ userId
       const data = await res.json();
       const items = data.items || [];
       setTransactions(items);
@@ -124,11 +127,34 @@ function App() {
     }
   };
 
+  // ← ДОБАВЬ ЭТОТ useEffect ПЕРЕД loadTransactions
   useEffect(() => {
-    loadTransactions();
+    // Получаем ID пользователя из Telegram
+    if (window.Telegram?.WebApp) {
+      const tg = window.Telegram.WebApp;
+      tg.ready();
+      
+      const user = tg.initDataUnsafe?.user;
+      if (user) {
+        setUserId(user.id.toString());
+        console.log('Telegram User ID:', user.id);
+      } else {
+        // Для тестирования вне Telegram
+        setUserId('test-user-' + Math.random().toString(36).substr(2, 9));
+      }
+    } else {
+      // Для локальной разработки
+      setUserId('local-user-' + Math.random().toString(36).substr(2, 9));
+    }
+  }, []);
+  
+  useEffect(() => {
+    if (userId) { // ← ДОБАВЬ УСЛОВИЕ
+      loadTransactions();
+    }
     const savedBudget = localStorage.getItem('monthlyBudget');
     if (savedBudget) setBudget(parseFloat(savedBudget));
-  }, []);
+  }, [userId]); // ← ДОБАВЬ userId В ЗАВИСИМОСТИ
 
   const filteredTransactions = transactions.filter(t => {
     if (filter !== 'all' && t.type !== filter) return false;
@@ -284,10 +310,11 @@ function App() {
             showExportMenu={showExportMenu}
             setShowExportMenu={setShowExportMenu}
             onExport={exportToCSV}
+            userId={userId} // ← ДОБАВЬ ЭТО
           />
         )}
         {tab === 'add' && (
-          <AddTransaction reload={loadTransactions} goToList={() => setTab('list')} />
+          <AddTransaction reload={loadTransactions} goToList={() => setTab('list')} userId={userId}/>
         )}
         {tab === 'analytics' && <Analytics transactions={transactions} stats={stats} budget={budget} />}
       </div>
@@ -642,11 +669,11 @@ function Analytics({ transactions, stats, budget }) {
   );
 }
 
-function TransactionList({ items, reload, filter, setFilter, categoryFilter, setCategoryFilter, dateRange, setDateRange, searchQuery, setSearchQuery, sortBy, setSortBy, showExportMenu, setShowExportMenu, onExport }) {
+function TransactionList({ items, reload, filter, setFilter, categoryFilter, setCategoryFilter, dateRange, setDateRange, searchQuery, setSearchQuery, sortBy, setSortBy, showExportMenu, setShowExportMenu, onExport, userId }) { // ← ДОБАВЬ userId
   const handleDelete = async (id) => {
     if (!confirm('Удалить транзакцию?')) return;
     try {
-      await fetch(`${API}/transactions/${id}`, { method: 'DELETE' });
+      await fetch(`${API}/transactions/${id}?userId=${userId}`, { method: 'DELETE' }); // ← ДОБАВЬ userId
       reload();
     } catch (e) {
       alert('Ошибка удаления');
@@ -874,7 +901,7 @@ function TransactionCard({ transaction, onDelete, compact }) {
   );
 }
 
-function AddTransaction({ reload, goToList }) {
+function AddTransaction({ reload, goToList, userId }) {
   const [amount, setAmount] = useState('');
   const [type, setType] = useState('expense');
   const [category, setCategory] = useState('');
@@ -901,6 +928,7 @@ function AddTransaction({ reload, goToList }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          userId: userId, // ← ДОБАВЬ ЭТО
           amount: parseFloat(amount),
           type,
           category,
