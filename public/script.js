@@ -1,6 +1,8 @@
 const { useState, useEffect } = React;
 
-const API = 'http://localhost:3001/api';
+const API = window.location.hostname === 'localhost' 
+  ? 'http://localhost:3001/api'
+  : 'https://finuchot.onrender.com/api';
 
 // 🔥 ПРОФЕССИОНАЛЬНЫЕ SVG ИКОНКИ вместо эмодзи
 const Icon = ({ name, size = 24, color = 'currentColor', strokeWidth = 2 }) => {
